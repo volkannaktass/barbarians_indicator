@@ -1,0 +1,600 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © SERS41
+//@version=5
+indicator("Barbarians Trade", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// Global settings {
+timeonoff       = input(false, title='Show Time',               group='Global Settings')
+sfpon           = input(false, title="Swing Failure Pattern",   group='Global Settings')
+orderblockonoff = input(false, title="Order Block",             group='Global Settings')
+Imbalance       = input(false, title='Imbalance',               group='Global Settings')
+wickopen        = input(false, title='Wick ',                   group='Global Settings')
+hpricel         = input(true,  title='High Low Price',          group='Global Settings')
+ShowHHLL        = input(false, title='HH,LL,LH,HL',             group='Global Settings')
+bullEnOp        = input(true,  title='Bullish Engulfing',       group='Global Settings')
+bearEnOp        = input(true,  title='Bearish Candle',          group='Global Settings')
+filigranopen    = input(true,  title='Filigran',                group='Global Settings')
+
+// }
+
+// Create Level Function {
+f_create_level(_type, _start_condition, _active_condition, _global_level_array, _color, _line_width, _line_ext, _line_style, _label_size, _title, _iter, _is_enabled) =>
+    var float _price = na
+    var int _start_time = na
+    var float _hh = na
+    var float _ll = na
+    var line _price_line = line.new(x1 = na, y1 = na, x2 = na, y2 = na, xloc = xloc.bar_time, color = _color, width = _line_width, style = _line_style)
+    var label _price_label = label.new(x = na, y = na, xloc = xloc.bar_time, style = label.style_label_left, color = #00000000, size = _label_size, textcolor = _color)
+    _end_time = int(time + _line_ext * ta.change(time))
+    if _type == "open"
+        if _start_condition
+            _price := open
+            _start_time := time
+    else if _type == "high"
+        if _start_condition
+            _price := high
+            _start_time := time
+        else if _active_condition
+            _price := math.max(_price, high)
+    else if _type == "low"
+        if _start_condition
+            _price := low
+            _start_time := time
+        else if _active_condition
+            _price := math.min(_price, low)
+    else if _type == "eq"
+        if _start_condition
+            _hh := high
+            _ll := low
+            _price := math.avg(_hh, _ll)
+            _start_time := time
+        else if _active_condition
+            _hh := math.max(_hh, high)
+            _ll := math.min(_ll, low)
+            _price := math.avg(_hh, _ll)
+            
+    float _price_val = _iter == 0 ? _price : ta.valuewhen(_start_condition, _price[1], _iter - 1)
+    int _start_time_val = _iter == 0 ? _start_time : ta.valuewhen(_start_condition, _start_time[1], _iter - 1)
+    _found_existing = array.indexof(_global_level_array, _price_val) > -1
+    if _is_enabled and timeonoff
+        if _found_existing
+            line.set_xy1(_price_line, x = na, y = na)
+            line.set_xy2(_price_line, x = na, y = na)
+            label.set_xy(_price_label, x = na, y = na)
+        else
+            array.push(_global_level_array, _price_val)
+            line.set_xy1(_price_line, x = _start_time_val, y = _price_val)
+            line.set_xy2(_price_line, x = _end_time, y = _price_val)
+            label.set_text(_price_label, text = _title + " : " + str.tostring(_price_val))
+            label.set_xy(_price_label, x = _end_time, y = _price_val)
+// }
+
+// Necessary Variables {
+float[] global_open_array = array.new_float()
+float[] global_high_array = array.new_float()
+float[] global_low_array = array.new_float()
+float[] global_eq_array = array.new_float()
+new_H4 = ta.change(time("240")) != 0
+new_day = ta.change(time("D")) != 0
+new_week = ta.change(time("W")) != 0
+new_month = ta.change(time("M")) != 0
+new_quarter = ta.change(time("3M")) != 0
+new_year = ta.change(time("12M")) != 0
+is_monday = dayofweek == dayofweek.monday
+// }
+
+// Time settings {
+inp_open_line_style =   input.string("Solid",   options = ["Solid", "Dotted", "Dashed"], title = "Open Line Style", group = "Time Settings", inline='1')
+inp_high_line_style =   input.string("Solid",   options = ["Solid", "Dotted", "Dashed"], title = "High Line Style", group = "Time Settings", inline='2')
+inp_low_line_style =    input.string("Solid",   options = ["Solid", "Dotted", "Dashed"], title = "Low Line Style",  group = "Time Settings", inline='3')
+inp_text_size =         input.string("Small",   options = ["Small", "Normal", "Large"],  title = "Text Size",       group = "Time Settings", inline='4')
+inp_ext =               input.int(20, title = "Line Extension", group = "Time Settings", inline='4')
+text_size = inp_text_size == "Small" ? size.small : inp_text_size == "Normal" ? size.normal : size.large
+open_line_style = inp_open_line_style == "Solid" ? line.style_solid : inp_open_line_style == "Dotted" ? line.style_dotted : line.style_dashed
+high_line_style = inp_high_line_style == "Solid" ? line.style_solid : inp_high_line_style == "Dotted" ? line.style_dotted : line.style_dashed
+low_line_style  = inp_low_line_style  == "Solid" ? line.style_solid : inp_low_line_style  == "Dotted" ? line.style_dotted : line.style_dashed
+// }
+
+// Daily and Prev Daily {
+inp_show_daily_open         = input.bool(true,  title = "Daily     Open |",group = "TIME OPEN-HIGH-LOW", inline = "5")
+inp_show_daily_high  = input.bool(false,  title = "High |",      group = "TIME OPEN-HIGH-LOW", inline = "5")
+inp_show_daily_low   = input.bool(false,  title = "Low |",       group = "TIME OPEN-HIGH-LOW", inline = "5")
+inp_daily_col        = input.color(color.gray, title = "",       group = "TIME OPEN-HIGH-LOW", inline = "5")
+inp_daily_line_width = input.int(1, title = "", minval = 1,      group = "TIME OPEN-HIGH-LOW", inline = "5")
+daily_ok = timeframe.isintraday
+f_create_level("open", new_day, not new_day, global_open_array, inp_daily_col, inp_daily_line_width, inp_ext, open_line_style, text_size, "DO", 0, inp_show_daily_open and daily_ok)
+f_create_level("high", new_day, not new_day, global_high_array, inp_daily_col, inp_daily_line_width, inp_ext, high_line_style, text_size, "DH", 0, inp_show_daily_high and daily_ok)
+f_create_level("low", new_day, not new_day, global_low_array, inp_daily_col, inp_daily_line_width, inp_ext, low_line_style, text_size, "DL", 0, inp_show_daily_low and daily_ok)
+inp_show_prev_daily_open  = input.bool(true, title = "Prev Daily Open |",  group = "PREV TIME OPEN-HIGH-LOW", inline = "6")
+inp_show_prev_daily_high  = input.bool(false, title = "High |",             group = "PREV TIME OPEN-HIGH-LOW", inline = "6")
+inp_show_prev_daily_low   = input.bool(false, title = "Low |",              group = "PREV TIME OPEN-HIGH-LOW", inline = "6")
+inp_prev_daily_col        = input.color(color.gray, title = "",             group = "PREV TIME OPEN-HIGH-LOW", inline = "6")
+inp_prev_daily_line_width = input.int(1, title = "", minval = 1,            group = "PREV TIME OPEN-HIGH-LOW", inline = "6")
+f_create_level("open", new_day, not new_day, global_open_array, inp_prev_daily_col, inp_prev_daily_line_width, inp_ext, open_line_style, text_size, "PDO", 1, inp_show_prev_daily_open and daily_ok)
+f_create_level("high", new_day, not new_day, global_high_array, inp_prev_daily_col, inp_prev_daily_line_width, inp_ext, high_line_style, text_size, "PDH", 1, inp_show_prev_daily_high and daily_ok)
+f_create_level("low", new_day, not new_day, global_low_array, inp_prev_daily_col, inp_prev_daily_line_width, inp_ext, low_line_style, text_size, "PDL", 1, inp_show_prev_daily_low and daily_ok)
+// }
+
+// Weekly and Prev Weekly {
+inp_show_weekly_open        = input.bool(true,  title = "Weekly    Open |", group = "TIME OPEN-HIGH-LOW", inline = "7")
+inp_show_weekly_high  = input.bool(false, title = "High |",        group = "TIME OPEN-HIGH-LOW", inline = "7")
+inp_show_weekly_low   = input.bool(false, title = "Low |",         group = "TIME OPEN-HIGH-LOW", inline = "7")
+inp_weekly_col        = input.color(color.aqua, title = "",        group = "TIME OPEN-HIGH-LOW", inline = "7")
+inp_weekly_line_width = input.int(2, title = "", minval = 1,       group = "TIME OPEN-HIGH-LOW", inline = "7")
+weekly_ok = timeframe.isintraday or timeframe.isdaily
+f_create_level("open", new_week, not new_week, global_open_array, inp_weekly_col, inp_weekly_line_width, inp_ext, open_line_style, text_size, "WO", 0, inp_show_weekly_open and weekly_ok)
+f_create_level("high", new_week, not new_week, global_high_array, inp_weekly_col, inp_weekly_line_width, inp_ext, high_line_style, text_size, "WH", 0, inp_show_weekly_high and weekly_ok)
+f_create_level("low", new_week, not new_week, global_low_array, inp_weekly_col, inp_weekly_line_width, inp_ext, low_line_style, text_size, "WL", 0, inp_show_weekly_low and weekly_ok)
+inp_show_prev_weekly_open  = input.bool(true, title = "Prev Weekly Open |", group = "PREV TIME OPEN-HIGH-LOW", inline = "8")
+inp_show_prev_weekly_high  = input.bool(false, title = "High |",             group = "PREV TIME OPEN-HIGH-LOW", inline = "8")
+inp_show_prev_weekly_low   = input.bool(false, title = "Low |",              group = "PREV TIME OPEN-HIGH-LOW", inline = "8")
+inp_prev_weekly_col        = input.color(color.blue, title = "",             group = "PREV TIME OPEN-HIGH-LOW", inline = "8")
+inp_prev_weekly_line_width = input.int(2, title = "", minval = 1,            group = "PREV TIME OPEN-HIGH-LOW", inline = "8")
+f_create_level("open", new_week, not new_week, global_open_array, inp_prev_weekly_col, inp_prev_weekly_line_width, inp_ext, open_line_style, text_size, "PWO", 1, inp_show_prev_weekly_open and weekly_ok)
+f_create_level("high", new_week, not new_week, global_high_array, inp_prev_weekly_col, inp_prev_weekly_line_width, inp_ext, high_line_style, text_size, "PWH", 1, inp_show_prev_weekly_high and weekly_ok)
+f_create_level("low", new_week, not new_week, global_low_array, inp_prev_weekly_col, inp_prev_weekly_line_width, inp_ext, low_line_style, text_size, "PWL", 1, inp_show_prev_weekly_low and weekly_ok)
+// }
+
+// Monthly and Prev Monthly {
+inp_show_monthly_open       = input.bool(true,  title = "Monthly   Open |",group = "TIME OPEN-HIGH-LOW", inline = "9")
+inp_show_monthly_high  = input.bool(false, title = "High |",        group = "TIME OPEN-HIGH-LOW", inline = "9")
+inp_show_monthly_low   = input.bool(false, title = "Low |",         group = "TIME OPEN-HIGH-LOW", inline = "9")
+inp_monthly_col        = input.color(color.lime, title = "",        group = "TIME OPEN-HIGH-LOW", inline = "9")
+inp_monthly_line_width = input.int(3, title = "", minval = 1,       group = "TIME OPEN-HIGH-LOW", inline = "9")
+monthly_ok = timeframe.isintraday or timeframe.isdaily
+f_create_level("open", new_month, not new_month, global_open_array, inp_monthly_col, inp_monthly_line_width, inp_ext, open_line_style, text_size, "MO", 0, inp_show_monthly_open and monthly_ok)
+f_create_level("high", new_month, not new_month, global_high_array, inp_monthly_col, inp_monthly_line_width, inp_ext, high_line_style, text_size, "MH", 0, inp_show_monthly_high and monthly_ok)
+f_create_level("low", new_month, not new_month, global_low_array, inp_monthly_col, inp_monthly_line_width, inp_ext, low_line_style, text_size, "ML", 0, inp_show_monthly_low and monthly_ok)
+inp_show_prev_monthly_open  = input.bool(true, title = "Prev Monthly Open |",  group = "PREV TIME OPEN-HIGH-LOW", inline = "10")
+inp_show_prev_monthly_high  = input.bool(false, title = "High |",               group = "PREV TIME OPEN-HIGH-LOW", inline = "10")
+inp_show_prev_monthly_low   = input.bool(false, title = "Low |",                group = "PREV TIME OPEN-HIGH-LOW", inline = "10")
+inp_prev_monthly_col        = input.color(color.green, title = "",              group = "PREV TIME OPEN-HIGH-LOW", inline = "10")
+inp_prev_monthly_line_width = input.int(3, title = "", minval = 1,              group = "PREV TIME OPEN-HIGH-LOW", inline = "10")
+f_create_level("open", new_month, not new_month, global_open_array, inp_prev_monthly_col, inp_prev_monthly_line_width, inp_ext, open_line_style, text_size, "PMO", 1, inp_show_prev_monthly_open and monthly_ok)
+f_create_level("high", new_month, not new_month, global_high_array, inp_prev_monthly_col, inp_prev_monthly_line_width, inp_ext, high_line_style, text_size, "PMH", 1, inp_show_prev_monthly_high and monthly_ok)
+f_create_level("low", new_month, not new_month, global_low_array, inp_prev_monthly_col, inp_prev_monthly_line_width, inp_ext, low_line_style, text_size, "PML", 1, inp_show_prev_monthly_low and monthly_ok)
+// }
+
+// Quarterly and Prev Quarterly {
+inp_show_quarterly_open  = input.bool(true,  title = "Quarterly Open |",group = "TIME OPEN-HIGH-LOW", inline = "11")
+inp_show_quarterly_high  = input.bool(false, title = "High |",          group = "TIME OPEN-HIGH-LOW", inline = "11")
+inp_show_quarterly_low   = input.bool(false, title = "Low |",           group = "TIME OPEN-HIGH-LOW", inline = "11")
+inp_quarterly_col        = input.color(color.orange, title = "",        group = "TIME OPEN-HIGH-LOW", inline = "11")
+inp_quarterly_line_width = input.int(4, title = "", minval = 1,         group = "TIME OPEN-HIGH-LOW", inline = "11")
+quarterly_ok = timeframe.isintraday or timeframe.isdaily or timeframe.isweekly
+f_create_level("open", new_quarter, not new_quarter, global_open_array, inp_quarterly_col, inp_quarterly_line_width, inp_ext, open_line_style, text_size, "QO", 0, inp_show_quarterly_open and quarterly_ok)
+f_create_level("high", new_quarter, not new_quarter, global_high_array, inp_quarterly_col, inp_quarterly_line_width, inp_ext, high_line_style, text_size, "QH", 0, inp_show_quarterly_high and quarterly_ok)
+f_create_level("low", new_quarter, not new_quarter, global_low_array, inp_quarterly_col, inp_quarterly_line_width, inp_ext, low_line_style, text_size, "QL", 0, inp_show_quarterly_low and quarterly_ok)
+inp_show_prev_quarterly_open  = input.bool(true, title = "Prev Quarterly Open |", group = "PREV TIME OPEN-HIGH-LOW", inline = "12")
+inp_show_prev_quarterly_high  = input.bool(false, title = "High |",                group = "PREV TIME OPEN-HIGH-LOW", inline = "12")
+inp_show_prev_quarterly_low   = input.bool(false, title = "Low |",                 group = "PREV TIME OPEN-HIGH-LOW", inline = "12")
+inp_prev_quarterly_col        = input.color(color.yellow, title = "",              group = "PREV TIME OPEN-HIGH-LOW", inline = "12")
+inp_prev_quarterly_line_width = input.int(4, title = "", minval = 1,               group = "PREV TIME OPEN-HIGH-LOW", inline = "12")
+f_create_level("open", new_quarter, not new_quarter, global_open_array, inp_prev_quarterly_col, inp_prev_quarterly_line_width, inp_ext, open_line_style, text_size, "PQO", 1, inp_show_prev_quarterly_open and quarterly_ok)
+f_create_level("high", new_quarter, not new_quarter, global_high_array, inp_prev_quarterly_col, inp_prev_quarterly_line_width, inp_ext, high_line_style, text_size, "PQH", 1, inp_show_prev_quarterly_high and quarterly_ok)
+f_create_level("low", new_quarter, not new_quarter, global_low_array, inp_prev_quarterly_col, inp_prev_quarterly_line_width, inp_ext, low_line_style, text_size, "PQL", 1, inp_show_prev_quarterly_low and quarterly_ok)
+// }
+
+// Yearly & Prev Yearly {
+inp_show_yearly_open        = input.bool(true,  title = "Yearly    Open |", group = "TIME OPEN-HIGH-LOW", inline = "13")
+inp_show_yearly_high        =  input.bool(false, title = "High |",        group = "TIME OPEN-HIGH-LOW", inline = "13")
+inp_show_yearly_low         =  input.bool(false, title = "Low |",         group = "TIME OPEN-HIGH-LOW", inline = "13")
+inp_yearly_col =        input.color(color.red, title = "",                group = "TIME OPEN-HIGH-LOW", inline = "13")
+inp_yearly_line_width = input.int(5, title = "", minval = 1,              group = "TIME OPEN-HIGH-LOW", inline = "13")
+yearly_ok = timeframe.isintraday or timeframe.isdaily or timeframe.isweekly or (timeframe.ismonthly and timeframe.multiplier < 12)
+f_create_level("open", new_year, not new_year, global_open_array, inp_yearly_col, inp_yearly_line_width, inp_ext, open_line_style, text_size, "YO", 0, inp_show_yearly_open and yearly_ok)
+f_create_level("high", new_year, not new_year, global_high_array, inp_yearly_col, inp_yearly_line_width, inp_ext, high_line_style, text_size, "YH", 0, inp_show_yearly_high and yearly_ok)
+f_create_level("low", new_year, not new_year, global_low_array, inp_yearly_col, inp_yearly_line_width, inp_ext, low_line_style, text_size, "YL", 0, inp_show_yearly_low and yearly_ok)
+inp_show_prev_yearly_open   =  input.bool(true,  title = "Prev Yearly Open |", group = "PREV TIME OPEN-HIGH-LOW", inline = "14")
+inp_show_prev_yearly_high   =  input.bool(false, title = "High |",              group = "PREV TIME OPEN-HIGH-LOW", inline = "14")
+inp_show_prev_yearly_low    =  input.bool(false, title = "Low |",               group = "PREV TIME OPEN-HIGH-LOW", inline = "14")
+inp_prev_yearly_col =        input.color(color.maroon, title = "",              group = "PREV TIME OPEN-HIGH-LOW", inline = "14")
+inp_prev_yearly_line_width = input.int(5, title = "", minval = 1,               group = "PREV TIME OPEN-HIGH-LOW", inline = "14")
+f_create_level("open", new_year, not new_year, global_open_array, inp_prev_yearly_col, inp_prev_yearly_line_width, inp_ext, open_line_style, text_size, "PYO", 1, inp_show_prev_yearly_open and yearly_ok)
+f_create_level("high", new_year, not new_year, global_high_array, inp_prev_yearly_col, inp_prev_yearly_line_width, inp_ext, high_line_style, text_size, "PYH", 1, inp_show_prev_yearly_high and yearly_ok)
+f_create_level("low", new_year, not new_year, global_low_array, inp_prev_yearly_col, inp_prev_yearly_line_width, inp_ext, low_line_style, text_size, "PYL", 1, inp_show_prev_yearly_low and yearly_ok)
+// }
+
+// Monday and Prev Monday {
+inp_show_monday_high        =  input.bool(true,  title = "Monday High |",       group = "MONDAY", inline = "14")
+inp_show_monday_low         =  input.bool(true,  title = "Low |",        group = "MONDAY", inline = "14")
+inp_monday_col =        input.color(color.fuchsia, title = "", group = "MONDAY", inline = "14")
+inp_monday_line_width = input.int(1, title = "", minval = 1, group = "MONDAY", inline = "14")
+monday_ok = timeframe.isintraday
+f_create_level("high", new_week, is_monday, global_high_array, inp_monday_col, inp_monday_line_width, inp_ext, open_line_style, text_size, "Monday HIGH", 0, inp_show_monday_high and monday_ok)
+f_create_level("low", new_week, is_monday, global_low_array, inp_monday_col, inp_monday_line_width, inp_ext, open_line_style, text_size, "Monday LOW", 0, inp_show_monday_low and monday_ok)
+inp_show_prev_monday_high   =  input.bool(false, title = "Prev Monday High |",       group = "MONDAY", inline = "15")
+inp_show_prev_monday_low    =  input.bool(false, title = "Low |",        group = "MONDAY", inline = "15")
+inp_prev_monday_col =        input.color(color.purple, title = "", group = "MONDAY", inline = "15")
+inp_prev_monday_line_width = input.int(1, title = "", minval = 1, group = "MONDAY", inline = "15")
+f_create_level("high", new_week, is_monday, global_high_array, inp_prev_monday_col, inp_prev_monday_line_width, inp_ext, open_line_style, text_size, "PMonday HIGH", 1, inp_show_prev_monday_high and monday_ok)
+f_create_level("low", new_week, is_monday, global_low_array, inp_prev_monday_col, inp_prev_monday_line_width, inp_ext, open_line_style, text_size, "PMonday LOW", 1, inp_show_prev_monday_low and monday_ok)
+// }
+
+// Order Block {
+string      bos_type        = input.string      ("Close and Open",  title='MSB trigger', options=["High and Low", "Close and Open"], group='ORDER BLOCK & MSB')
+bool        pv2_sv          = input.bool        (false,             title='Display 2nd order pivots',                                group='ORDER BLOCK & MSB')
+bool        bos_sv          = input.bool        (true,              title='Highlight candles that broke structure',                  group='ORDER BLOCK & MSB')
+bool        msb_sv          = input.bool        (true,              title='Plot market structure broke lines',                       group='ORDER BLOCK & MSB')
+bool        box_sv          = input.bool        (true,              title='Plot demand boxes',                                       group='ORDER BLOCK & MSB')
+int         box_test_delay  = input.int         (3,                 title='Delay to count test of demand box',                       group='ORDER BLOCK & MSB')
+int         box_fill_delay  = input.int         (3,                 title='Delay to count fill of demand box',                       group='ORDER BLOCK & MSB')
+bool        box_test_sv     = input.bool        (true,              title='Dim tested demand boxes',                                 group='ORDER BLOCK & MSB')
+bool        box_stop_sv     = input.bool        (true,              title='Stop plotting filled demand boxes',                       group='ORDER BLOCK & MSB')
+var float[] pvh1_price      = array.new_float   (1000, na)          // high
+var int[]   pvh1_time       = array.new_int     (1000, na)
+var float[] pvl1_price      = array.new_float   (1000, na)          // low
+var int[]   pvl1_time       = array.new_int     (1000, na)
+var float[] pvh2_price      = array.new_float   (1000, na)          // higher high
+var int[]   pvh2_time       = array.new_int     (1000, na)
+var float[] pvl2_price      = array.new_float   (1000, na)          // lower low
+var int[]   pvl2_time       = array.new_int     (1000, na)
+var float   htcmrll_price   = na                                    // high that created most recent ll
+var int     htcmrll_time    = na
+var float   ltcmrhh_price   = na                                    // low that created most recent hh
+var int     ltcmrhh_time    = na
+var box[]   long_boxes      = array.new_box()
+var box[]   short_boxes     = array.new_box()
+var box[]   oldlong_boxes   = array.new_box()
+var box[]   oldshort_boxes  = array.new_box()
+var line[]  bull_bos_lines  = array.new_line()
+var line[]  bear_bos_lines  = array.new_line()
+var label[] la_ph2          = array.new_label   (1000, na)
+var label[] la_pl2          = array.new_label   (1000, na)
+var float   temp_pv_0       = na
+var float   temp_pv_1       = na
+var float   temp_pv_2       = na
+bool        pvh             = high < high[1] and high[1] > high[2]
+bool        pvl             = low > low[1] and low[1] < low[2]
+int         pv1_time        = bar_index[1]
+float       pv1_high        = high[1]
+float       pv1_low         = low[1]
+float       trigger_high    = bos_type=="High and Low" ? high : math.max(open, close)
+float       trigger_low     = bos_type=="High and Low" ? low : math.min(open, close)
+bool        bos_candle      = false
+bool        new_ph_2nd      = false
+bool        new_pl_2nd      = false
+if barstate.isconfirmed
+    if orderblockonoff and pvh
+        array.pop(pvh1_price)
+        array.pop(pvh1_time)
+        array.unshift(pvh1_price, pv1_high)
+        array.unshift(pvh1_time, pv1_time)
+        if array.size(pvh1_price) > 2
+            temp_pv_0 := array.get(pvh1_price, 0)
+            temp_pv_1 := array.get(pvh1_price, 1)
+            temp_pv_2 := array.get(pvh1_price, 2)
+            if temp_pv_0 > temp_pv_1
+                for i = 0 to array.size(pvl1_time) - 1 by 1
+                    temp_ltcmrhh_time = array.get(pvl1_time, i)
+                    if temp_ltcmrhh_time < array.get(pvh1_time, 0)
+                        ltcmrhh_price := array.get(pvl1_price, i)
+                        ltcmrhh_time := temp_ltcmrhh_time
+                        break
+            if temp_pv_0 < temp_pv_1 and temp_pv_1 > temp_pv_2
+                array.pop(pvh2_price)
+                array.pop(pvh2_time)
+                array.unshift(pvh2_price, temp_pv_1)
+                array.unshift(pvh2_time, array.get(pvh1_time, 1))
+                new_ph_2nd := true
+    if orderblockonoff and pvl
+        array.pop(pvl1_price)
+        array.pop(pvl1_time)
+        array.unshift(pvl1_price, pv1_low)
+        array.unshift(pvl1_time, pv1_time)
+        if array.size(pvl1_price) > 2
+            temp_pv_0 := array.get(pvl1_price, 0)
+            temp_pv_1 := array.get(pvl1_price, 1)
+            temp_pv_2 := array.get(pvl1_price, 2)
+            if temp_pv_0 < temp_pv_1
+                for i = 0 to array.size(pvh1_time) - 1 by 1
+                    temp_htcmrll_time = array.get(pvh1_time, i)
+                    if temp_htcmrll_time < array.get(pvl1_time, 0)
+                        htcmrll_price := array.get(pvh1_price, i)
+                        htcmrll_time := temp_htcmrll_time
+                        break
+            if temp_pv_0 > temp_pv_1 and temp_pv_1 < temp_pv_2
+                array.pop(pvl2_price)
+                array.pop(pvl2_time)
+                array.unshift(pvl2_price, temp_pv_1)
+                array.unshift(pvl2_time, array.get(pvl1_time, 1))
+                new_pl_2nd := true
+    if orderblockonoff and trigger_high > htcmrll_price
+        if msb_sv
+            array.push(bull_bos_lines, line.new(x1=htcmrll_time, y1=htcmrll_price, x2=bar_index, y2=htcmrll_price, color=color.red, width=1))
+        if box_sv
+            array.push(long_boxes, box.new(left=array.get(pvl1_time, 0), top=math.min(high[bar_index - array.get(pvl1_time, 0)], high[bar_index - array.get(pvl1_time, 0) + 1]), right=bar_index, bottom=array.get(pvl1_price, 0), bgcolor=color.rgb(0, 255, 0, 80), border_color=color.rgb(0, 255, 0, 80), extend=extend.right))
+        bos_candle := true
+        htcmrll_price := na
+        htcmrll_price
+    if orderblockonoff and trigger_low < ltcmrhh_price
+        if msb_sv
+            array.push(bear_bos_lines, line.new(x1=ltcmrhh_time, y1=ltcmrhh_price, x2=bar_index, y2=ltcmrhh_price, color=color.green, width=1))
+        if box_sv
+            array.push(short_boxes, box.new(left=array.get(pvh1_time, 0), top=array.get(pvh1_price, 0), right=bar_index, bottom=math.max(low[bar_index - array.get(pvh1_time, 0)], low[bar_index - array.get(pvh1_time, 0) + 1]), bgcolor=color.rgb(255, 0, 0, 80), border_color=color.rgb(255, 0, 0, 80), extend=extend.right))
+        bos_candle := true
+        ltcmrhh_price := na
+        ltcmrhh_price
+    if array.size(short_boxes) > 0
+        for i = array.size(short_boxes) - 1 to 0 by 1
+            tbox = array.get(short_boxes, i)
+            top = box.get_top(tbox)
+            bottom = box.get_bottom(tbox)
+            if trigger_high > bottom and box.get_left(tbox) + box_test_delay < bar_index and box_test_sv
+                box.set_bgcolor(tbox, color.rgb(192, 192, 192, 80))
+                box.set_border_color(tbox, color.rgb(192, 192, 192, 80))
+            if trigger_high > top and box.get_left(tbox) + box_fill_delay < bar_index
+                if box_stop_sv
+                    box.set_right(tbox, bar_index)
+                    box.set_extend(tbox, extend.none)
+                    array.unshift(oldshort_boxes, tbox)
+                    array.remove(short_boxes, i)
+    if array.size(long_boxes) > 0
+        for i = array.size(long_boxes) - 1 to 0 by 1
+            lbox = array.get(long_boxes, i)
+            top = box.get_top(lbox)
+            bottom = box.get_bottom(lbox)
+            if trigger_low < top and box.get_left(lbox) + box_test_delay < bar_index and box_test_sv
+                box.set_bgcolor(lbox, color.rgb(192, 192, 192, 80))
+                box.set_border_color(lbox, color.rgb(192, 192, 192, 80))
+            if trigger_low < bottom and box.get_left(lbox) + box_fill_delay < bar_index
+                if box_stop_sv
+                    box.set_right(lbox, bar_index)
+                    box.set_extend(lbox, extend.none)
+                    array.unshift(oldlong_boxes, lbox)
+                    array.remove(long_boxes, i)
+    if orderblockonoff and pv2_sv
+        if new_ph_2nd
+            array.pop(la_ph2)
+            array.unshift(la_ph2, label.new(x = array.get(pvh2_time, 0), y = array.get(pvh2_price, 0), xloc = xloc.bar_index, style = label.style_label_down,    color=color.new(#770000FF, 90), size = size.tiny))
+        if new_pl_2nd
+            array.pop(la_pl2)
+            array.unshift(la_pl2, label.new(x = array.get(pvl2_time, 0), y = array.get(pvl2_price, 0), xloc = xloc.bar_index, style = label.style_label_up,      color=color.new(#770000FF, 90), size = size.tiny))
+barcolor(bos_candle and bos_sv ? color.yellow : na)
+// }
+
+// Swing Failure Pattern {
+swingHistory     = input.int(10, title='Swing history:',      minval=1, group='SWING FAILURE PATTERN')
+plotSwings       = input(false,  title='Plot swings',                   group='SWING FAILURE PATTERN')
+plotFirstSFPOnly = input(true,   title='Plot only first SFP candle',    group='SWING FAILURE PATTERN')
+plotStrongerSFPs = input.int(10, title='Plot stronger SFPs:', minval=0, group='SWING FAILURE PATTERN')
+// Swing Lows and Swing Highs code
+isSwingHigh = false
+isSwingLow = false
+swingHigh = high[swingHistory]
+swingLow = low[swingHistory]
+range_1 = swingHistory * 2
+for i = 0 to range_1 by 1
+    isSwingHigh := true
+    if i < swingHistory
+        if high[i] > swingHigh
+            isSwingHigh := false
+            break
+    if i > swingHistory
+        if high[i] >= swingHigh
+            isSwingHigh := false
+            break
+for i = 0 to range_1 by 1
+    isSwingLow := true
+    if i < swingHistory
+        if low[i] < swingLow
+            isSwingLow := false
+            break
+    if i > swingHistory
+        if low[i] <= swingLow
+            isSwingLow := false
+            break
+// Swing Failure Pattern
+isSwingHighFailure = false
+isSwingLowFailure = false
+var lastSwingHigh = float(na)
+var lastSwingLow = float(na)
+lastSwingHigh := isSwingHigh ? swingHigh : lastSwingHigh
+lastSwingLow := isSwingLow ? swingLow : lastSwingLow
+strengthOfHighSFP = 0
+if lastSwingHigh < high and lastSwingHigh > close and ta.barssince(lastSwingHigh) <= swingHistory
+    isSwingHighFailure := true
+    if plotFirstSFPOnly
+        lastSwingHigh := na
+        lastSwingHigh
+    else
+        for i = 0 to plotStrongerSFPs by 1
+            if isSwingHighFailure[i]
+                strengthOfHighSFP += 1  // it will be at least 1
+                strengthOfHighSFP
+            else
+                if high[i] > high
+                    strengthOfHighSFP -= 1
+                    strengthOfHighSFP
+strengthOfLowSFP = 0
+if lastSwingLow > low and lastSwingLow < close and ta.barssince(lastSwingLow) <= swingHistory
+    isSwingLowFailure := true
+    if plotFirstSFPOnly
+        lastSwingLow := na
+        lastSwingLow
+    else
+        for i = 0 to plotStrongerSFPs by 1
+            if isSwingHighFailure[i]
+                strengthOfLowSFP += 1  // it will be at least 1
+                strengthOfLowSFP
+            else
+                if low[i] < low
+                    strengthOfLowSFP -= 1
+                    strengthOfLowSFP
+// Debugging
+plotchar(isSwingHighFailure, 'Swing High Failure', '', location.top)
+plotchar(isSwingLowFailure, 'Swing Low Failure', '', location.top)
+plotchar(lastSwingHigh, 'Last Swing High', '', location.top)
+plotchar(lastSwingLow, 'Last Swing Low', '', location.top)
+// Alerting
+alertcondition(condition=isSwingHighFailure, title='SFP: Swing High Failure', message='Swing High Failure')
+alertcondition(condition=isSwingLowFailure, title='SFP: Swing Low Failure', message='Swing Low Failure')
+alertcondition(condition=isSwingHighFailure or isSwingLowFailure, title='SFP: Any Swing Failure Pattern', message='Any Swing Failure Pattern')
+// Plotting
+plotshape(series=plotSwings ? isSwingHigh and sfpon : na, style=shape.triangledown, text='SH', color=color.new(color.red, 30), textcolor=color.new(color.gray, 0), location=location.abovebar, size=size.tiny, offset=-swingHistory)
+plotshape(series=plotSwings ? isSwingLow and sfpon : na,  style=shape.triangleup,   text='SL',  color=color.new(color.green, 30), textcolor=color.new(color.gray, 0), location=location.belowbar, size=size.tiny, offset=-swingHistory)
+plotshape(series=isSwingHighFailure and sfpon and strengthOfHighSFP <= 1, style=shape.triangledown, text='SFP',  color=color.new(color.red, 30), textcolor=color.new(color.gray, 0), location=location.abovebar, size=size.tiny)
+plotshape(series=isSwingHighFailure and sfpon and strengthOfHighSFP >= 3, style=shape.triangledown, text='SFPs', color=color.new(color.red, 30), textcolor=color.new(color.gray, 0), location=location.abovebar, size=size.tiny)
+plotshape(series=isSwingLowFailure and sfpon and strengthOfLowSFP <= 1,   style=shape.triangleup,   text='SFPs', color=color.new(color.green, 30), textcolor=color.new(color.gray, 0), location=location.belowbar, size=size.tiny)
+plotshape(series=isSwingLowFailure and sfpon and strengthOfLowSFP >= 3,   style=shape.triangleup,   text='SFP',  color=color.new(color.green, 30), textcolor=color.new(color.gray, 0), location=location.belowbar, size=size.tiny)
+// }
+
+// High Low Price {
+leftbars    = input.int(50, minval=1, title='High Price',       group='HIGH LOW PRICE', inline='1')
+rightbars   = input.int(25, minval=1, title='  |  Low Price',   group='HIGH LOW PRICE', inline='1')
+phigh       = ta.pivothigh(high, leftbars, rightbars)
+plow        = ta.pivotlow(low,   leftbars, rightbars)
+if hpricel and phigh
+    label1 = label.new(bar_index[rightbars], high[rightbars], text=str.tostring(high[rightbars]), style=label.style_label_down, color=color.new(color.black, 100), textcolor=color.new(color.gray, 0), size=size.small)
+    label1
+if hpricel and plow
+    label2 = label.new(bar_index[rightbars], low[rightbars], text=str.tostring(low[rightbars]), style=label.style_label_up, color=color.new(color.black, 100), textcolor=color.new(color.gray, 0), size=size.small)
+    label2
+// }
+
+// HH/HL/LH/LL {
+lefthh  = input.int(5, minval=1, title='Pivot Length left',       group='HH, LL, LH, HL', inline='1')
+righthh = input.int(5, minval=1, title='  |  Pivot Length right', group='HH, LL, LH, HL', inline='1')
+pvtLenL = lefthh
+pvtLenR = righthh
+pvthi_ = ta.pivothigh(high, pvtLenL, pvtLenR)
+pvtlo_ = ta.pivotlow(low, pvtLenL, pvtLenR)
+pvthi = pvthi_
+pvtlo = pvtlo_
+valuewhen_1 = ta.valuewhen(pvthi, high[pvtLenR], 1)
+valuewhen_2 = ta.valuewhen(pvthi, high[pvtLenR], 0)
+higherhigh = na(pvthi) ? na : valuewhen_1 < valuewhen_2 ? pvthi : na
+valuewhen_3 = ta.valuewhen(pvthi, high[pvtLenR], 1)
+valuewhen_4 = ta.valuewhen(pvthi, high[pvtLenR], 0)
+lowerhigh = na(pvthi) ? na : valuewhen_3 > valuewhen_4 ? pvthi : na
+valuewhen_5 = ta.valuewhen(pvtlo, low[pvtLenR], 1)
+valuewhen_6 = ta.valuewhen(pvtlo, low[pvtLenR], 0)
+higherlow = na(pvtlo) ? na : valuewhen_5 < valuewhen_6 ? pvtlo : na
+valuewhen_7 = ta.valuewhen(pvtlo, low[pvtLenR], 1)
+valuewhen_8 = ta.valuewhen(pvtlo, low[pvtLenR], 0)
+lowerlow = na(pvtlo) ? na : valuewhen_7 > valuewhen_8 ? pvtlo : na
+plotshape(ShowHHLL ? higherhigh : na, title='HH', style=shape.triangledown, location=location.abovebar, color=color.new(color.green, 100),  text='HH', textcolor=color.new(color.green, 0), offset=-pvtLenR)
+plotshape(ShowHHLL ? higherlow  : na, title='HL', style=shape.triangleup,   location=location.belowbar, color=color.new(color.green, 100),  text='HL', textcolor=color.new(color.green, 0), offset=-pvtLenR)
+plotshape(ShowHHLL ? lowerhigh  : na, title='LH', style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 100),    text='LH', textcolor=color.new(color.red, 0),   offset=-pvtLenR)
+plotshape(ShowHHLL ? lowerlow   : na, title='LL', style=shape.triangleup,   location=location.belowbar, color=color.new(color.red, 100),    text='LL', textcolor=color.new(color.red, 0),   offset=-pvtLenR)
+counthi = 0
+countlo = 0
+counthi := na(pvthi) ? nz(counthi[1]) + 1 : 0
+countlo := na(pvtlo) ? nz(countlo[1]) + 1 : 0
+pvthis = 0.0
+pvtlos = 0.0
+pvthis := na(pvthi) ? pvthis[1] : high[pvtLenR]
+pvtlos := na(pvtlo) ? pvtlos[1] : low[pvtLenR]
+hipc = pvthis != pvthis[1] ? na : color.new(color.red, 50)
+lopc = pvtlos != pvtlos[1] ? na : color.new(color.green, 50)
+// }
+
+// Imbalance {
+var color purpco = color.new(color.purple, 50)
+TopImbalance = low[2] <= open[1] and high[0] >= close[1]
+TopImbalancesize = low[2] - high[0]
+if Imbalance and TopImbalance and TopImbalancesize > 0
+    BOX1 = box.new(left=bar_index[1], top=low[2], right=bar_index[0], bottom=high[0])
+    box.set_bgcolor(BOX1, purpco)
+    box.set_border_color(BOX1, purpco)
+BottomInbalance = high[2] >= open[1] and low[0] <= close[1]
+BottomInbalancesize = low[0] - high[2]
+if Imbalance and BottomInbalance and BottomInbalancesize > 0
+    BOX2 = box.new(left=bar_index[1], top=low[0], right=bar_index[0], bottom=high[2])
+    box.set_bgcolor(BOX2, purpco)
+    box.set_border_color(BOX2, purpco)
+// }
+
+// Bullish Engulfing , Bearish Candle {
+bullEnHeight = input.int(title='Height', minval=1, maxval=100, step=1, defval=10, confirm=false, group = 'BULLISH ENGULFING', inline='1')
+bullEnAbove = input.int(title=' | Above', minval=1, maxval=100, step=1, defval=3, confirm=false, group = 'BULLISH ENGULFING', inline='1')
+bullEnBelow = input.int(title=' | Below', minval=1, maxval=100, step=1, defval=1, confirm=false, group = 'BULLISH ENGULFING', inline='1')
+bearEnHeight = input.int(title='Height', minval=1, maxval=100, step=1, defval=10, confirm=false, group = 'BEARISH CANDLE', inline='1')
+bearEnAbove = input.int(title=' | Above', minval=1, maxval=100, step=1, defval=3, confirm=false, group = 'BEARISH CANDLE', inline='1')
+bearEnBelow = input.int(title=' | Below', minval=1, maxval=100, step=1, defval=1, confirm=false, group = 'BEARISH CANDLE', inline='1')
+bullEngulfing = (open[1] - close[1]) / syminfo.mintick >= bullEnHeight and close > open and (close - open[1]) / syminfo.mintick >= bullEnAbove and (close[1] - open) / syminfo.mintick >= bullEnBelow
+bearEngulfing = (close[1] - open[1]) / syminfo.mintick >= bearEnHeight and close < open and (open - close[1]) / syminfo.mintick >= bearEnAbove and (open[1] - close) / syminfo.mintick >= bearEnBelow
+plotshape(bullEnOp ? bullEngulfing : na, title='Bull Engulfing', style=shape.cross, location=location.abovebar, color=color.new(color.green, 0), size=size.tiny, editable=true, text='️', offset=-1)
+plotshape(bearEnOp ? bearEngulfing : na, title='Bear Engulfing', style=shape.xcross, location=location.belowbar, color=color.new(color.red, 0), size=size.tiny, text='', offset=-1)
+// }
+
+// Support/Resistance WICK {
+volMALength  = input(20,   title='Vol MA Length',     group='WICK')
+stdevLength  = input(20,   title='Length',            group='WICK')
+stdevHigh    = input(2.50, title='Threshold High',    group='WICK')
+stdevExtreme = input(3.00, title='Threshold Extreme', group='WICK')
+volumeVal    = volume
+volumeMA     = ta.sma(volumeVal, volMALength)
+stdevValue   = ta.stdev(volumeVal, stdevLength)
+extremeVol = volumeMA + stdevExtreme * stdevValue  // Extreme Volume Threshold
+highVol = volumeMA + stdevHigh * stdevValue        // High Volume Threshold
+wickminimum   = input(75.00, title='Minimum Wick Length [% of Body]', group='WICK')
+linelength    = input(40,    title='Length of Lines (No of Candles)', group='WICK')
+colorstrength = input.string(title='Line Color Intensity', defval='STRONG', options=['STRONG', 'WEAK'],               group='WICK')
+display       = input.string(title='Support/Resistance',   defval='ALL',    options=['RESISTANCE', 'SUPPORT', 'ALL'], group='WICK')
+display2      = input.string(title='High/Extreme Volume',  defval='ALL',    options=['HIGH', 'EXTREME', 'ALL'],       group='WICK')
+display3      = input.string(title='WICK / WICK Range',    defval='WICK',   options=['RANGE', 'WICK'],                group='WICK')
+bullcandle = close >= open
+bearcandle = close < open
+bodylength = math.abs(open - close)
+wicklength = bearcandle ? math.abs(low - close) : math.abs(high - close)
+wickratio = wicklength / bodylength * 100
+rel_wick = wickratio >= wickminimum  // Relevant Wick?
+vol_above_limit1 = volumeVal > highVol and volumeVal < extremeVol and rel_wick
+vol_above_limit2 = volumeVal >= extremeVol and rel_wick
+Scol_green1 = color.new(color.gray, 40)  // Weak Green
+Scol_green2 = color.new(color.gray, 10)  // Strong Green
+Scol_red1 = color.new(color.gray, 40)  // Weak Red
+Scol_red2 = color.new(color.gray, 10)  // Strong Red
+Wcol_green1 = color.new(color.gray, 80)  // Weak Green
+Wcol_green2 = color.new(color.gray, 50)  // Strong Green
+Wcol_red1 = color.new(color.gray, 80)  // Weak Red
+Wcol_red2 = color.new(color.gray, 50)  // Strong Red
+col_green1 = colorstrength == 'STRONG' ? Scol_green1 : Wcol_green1
+col_green2 = colorstrength == 'STRONG' ? Scol_green2 : Wcol_green2
+col_red1 = colorstrength == 'STRONG' ? Scol_red1 : Wcol_red1
+col_red2 = colorstrength == 'STRONG' ? Scol_red2 : Wcol_red2
+plotshape(wickopen and vol_above_limit2 and bullcandle ? close : na, title='Resistance - Volume above Threshold x 2', style=shape.triangledown, location=location.abovebar, color=col_red1, size=size.tiny)
+plotshape(wickopen and vol_above_limit2 and bearcandle ? close : na, title='Support - Volume above Threshold x 2', style=shape.triangleup, location=location.belowbar, color=col_green1, size=size.tiny)
+chper = time - time[1]
+chper := ta.change(chper) > 0 ? chper[1] : chper
+
+if wickopen and vol_above_limit2 and bullcandle and (display == 'ALL' or display == 'RESISTANCE') and (display2 == 'ALL' or display2 == 'EXTREME') and display3 == 'RANGE'
+    bull1 = line.new(time, close, time + chper * linelength, close, xloc=xloc.bar_time, color=col_red2, style=line.style_solid, width=1)
+    bull2 = line.new(time, high, time + chper * linelength, high, xloc=xloc.bar_time, color=col_red2, style=line.style_solid, width=1)
+    bull3 = line.new(time, (high + close) / 2, time + chper * linelength, (high + close) / 2, xloc=xloc.bar_time, color=col_red2, style=line.style_solid, width=2)
+    bull3
+if wickopen and vol_above_limit2 and bullcandle and (display == 'ALL' or display == 'RESISTANCE') and (display2 == 'ALL' or display2 == 'EXTREME') and display3 == 'WICK'
+    bull4 = line.new(time, high, time + chper * linelength, high, xloc=xloc.bar_time, color=col_red2, style=line.style_solid, width=2)
+    bull4
+if wickopen and vol_above_limit2 and bearcandle and (display == 'ALL' or display == 'SUPPORT') and (display2 == 'ALL' or display2 == 'EXTREME') and display3 == 'RANGE'
+    bear1 = line.new(time, close, time + chper * linelength, close, xloc=xloc.bar_time, color=col_green2, style=line.style_solid, width=1)
+    bear2 = line.new(time, low, time + chper * linelength, low, xloc=xloc.bar_time, color=col_green2, style=line.style_solid, width=1)
+    bear3 = line.new(time, (low + close) / 2, time + chper * linelength, (low + close) / 2, xloc=xloc.bar_time, color=col_green2, style=line.style_solid, width=2)
+    bear3
+if wickopen and vol_above_limit2 and bearcandle and (display == 'ALL' or display == 'SUPPORT') and (display2 == 'ALL' or display2 == 'EXTREME') and display3 == 'WICK'
+    bear4 = line.new(time, low, time + chper * linelength, low, xloc=xloc.bar_time, color=col_green2, style=line.style_solid, width=2)
+    bear4
+// }
+
+// Filigran {
+// -----------------------------------------------------------------------------
+string  i_text1     = input.string("-BARBARIANS TRADE-", "Metin 1", inline = "11", group = 'FILIGRAN')
+string  i_text2     = input.string("+BARBARIANS TRADE+", "Metin 2", inline = "11", tooltip = "Animasyonu önlemek için 'Metin 2'yi temizleyin.", group = 'FILIGRAN')
+string  i_tableYpos = input.string("top", "Konum", inline = "12", options = ["top", "middle", "bottom"], group = 'FILIGRAN')
+string  i_tableXpos = input.string("center", "", inline = "12", options = ["left", "center", "right"], group = 'FILIGRAN')
+int     i_height    = input.int(5, "Yükseklik", minval = 1, maxval = 100, inline = "13", group = 'FILIGRAN')
+int     i_width     = input.int(12, "Genişlik",  minval = 1, maxval = 100, inline = "13", tooltip = "1-100", group = 'FILIGRAN')
+color   i_c_text    = input(color.new(color.white, 30), "Metin", inline = "14", group = 'FILIGRAN')
+string  i_textSize  = input.string("normal", "Boyut", inline = "14", options = ["tiny", "small", "normal", "large", "huge", "auto"], group = 'FILIGRAN')
+color   i_c_bg      = input(color.new(color.blue, 50), "Arkaplan", group = 'FILIGRAN')
+
+var table watermark = table.new(i_tableYpos + "_" + i_tableXpos, 1, 1)
+
+if filigranopen and barstate.islast
+    varip bool _changeText = true
+    _changeText := not _changeText
+    string _txt = str.length(i_text2) != 0 and _changeText ? i_text2 : i_text1
+    table.cell(watermark, 0, 0, _txt, i_width, i_height, i_c_text, text_size = i_textSize, bgcolor = i_c_bg)
+// -----------------------------------------------------------------------------
+// }
